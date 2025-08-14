@@ -1,126 +1,51 @@
-Documentation de la Syntaxe YAML pour la Génération de Diagrammes
-Ce document décrit la syntaxe YAML utilisée pour générer des diagrammes SVG interactifs. Un fichier de diagramme est structuré autour de deux sections principales : elements (les nœuds) et relations (les liens entre les nœuds).
+## Diagram Server — Guide d’utilisation (YAML)
 
-1. Structure Globale
-Le fichier YAML doit contenir deux listes à la racine :
+### Introduction
+Ce serveur génère un diagramme SVG interactif à partir d’un fichier YAML. Il supporte:
+- Thèmes (light/dark), layouts (TB/BT/LR/RL)
+- Groupes (clusters)
+- Icônes, modales (hover/click), liens
+- Formes de nœuds (rectangles, polygones, flèches…)
+- Reload automatique à chaque sauvegarde (SSE)
 
-# Liste de tous les nœuds (boîtes, objets, etc.) du diagramme.
+### Lancer le serveur
+```bash
+node index.js chemin/diagramme.yaml --theme light --layout TB --port 3000
+# theme: light|dark      layout: TB|BT|LR|RL
+# Ouvrir: http://localhost:3000
+# Le SVG se régénère et la page se recharge à chaque sauvegarde du YAML
+```
+
+---
+
+## Schéma YAML
+
+### Structure minimale
+```yaml
 elements:
-  - id: element_1
-    # ... configuration de l'élément 1 ...
-  - id: element_2
-    # ... configuration de l'élément 2 ...
+  - id: node_a
+    title: "Mon nœud"
+    type: system
 
-# Liste de toutes les connexions entre les éléments.
 relations:
-  - from: element_1
-    to: element_2
-    # ... configuration de la relation ...
+  - from: node_a
+    to: node_b
+    title: "Lien"
+```
 
-2. La section elements
-La section elements définit chaque "boîte" ou nœud visible sur le diagramme. Chaque élément est un objet dans la liste.
+### Attributs d’un élément
+- id (string, requis): identifiant unique
+- title (string), subtitle (string)
+- type (string): person | database | api | system | tableau | default
+- width, height (number): dimensions (px)
+- group (string): nom du cluster
+- tags (string[]): influence l’icône du titre (ex: ["user"], ["database"], ["api"], ["warning"])
+- shape (object): forme du conteneur (cf. Formes)
+- content_list (list): contenu structuré (sections/items)
+- html_content (string): alternative avec HTML embarqué
 
-2.1. Attributs principaux d'un élément
-Attribut
-
-Type
-
-Obligatoire
-
-Description
-
-id
-
-Chaîne
-
-Oui
-
-Identifiant unique de l'élément. Utilisé pour créer les relations.
-
-title
-
-Chaîne
-
-Non
-
-Le titre principal affiché en haut de l'élément.
-
-subtitle
-
-Chaîne
-
-Non
-
-Un sous-titre affiché sous le titre principal.
-
-type
-
-Chaîne
-
-Non
-
-Définit la couleur de fond et/ou l'icône de l'élément. Valeurs communes : person, database, api, system, tableau, default.
-
-width
-
-Nombre
-
-Non
-
-Largeur de l'élément en pixels.
-
-height
-
-Nombre
-
-Non
-
-Hauteur de l'élément en pixels.
-
-group
-
-Chaîne
-
-Non
-
-Si spécifié, l'élément sera placé dans un conteneur (cluster) portant ce nom.
-
-shape
-
-Objet
-
-Non
-
-Permet de changer la forme du conteneur du noeud (voir annexe).
-
-2.2. Contenu d'un élément
-Il existe trois manières de définir le contenu d'un élément.
-
-A. content_list (Contenu structuré et détaillé)
-C'est la méthode la plus complète. Elle permet de créer des listes d'items groupés par sections, avec des icônes, des sous-titres et des modales interactives.
-
-La structure est une liste de sections. Chaque section contient :
-
-label: Le titre de la section.
-
-symbol: (Optionnel) Le nom d'une icône à afficher à côté du titre de la section.
-
-values: Une liste d'items.
-
-Chaque item dans values peut contenir :
-
-label: Le texte principal de l'item.
-
-subtitle: (Optionnel) Un texte secondaire en plus petit, supporte les balises HTML simples comme <b> ou <i>.
-
-symbol: (Optionnel) Le nom d'une icône à afficher à côté de l'item.
-
-url: (Optionnel) Une URL qui sera ouverte dans un nouvel onglet au clic.
-
-modal: (Optionnel) Un objet pour configurer une fenêtre modale qui apparaît au survol ou au clic.
-
-Exemple avec content_list :
-
+### Contenu structuré (content_list)
+```yaml
 - id: account
   type: person
   title: "Table: Account"
@@ -129,191 +54,206 @@ Exemple avec content_list :
   height: 450
   content_list:
     - label: "Champs Modifiés"
-      symbol: "edit" # Icône pour la section
+      symbol: "edit"         # icône pour la section
       values:
-        - label: "APB Student Key → Current Year Parcoursup Number"
-          subtitle: "<b>Nouvelle valeur:</b> [année]_[num_parcoursup]"
-          symbol: "edit" # Icône pour l'item
-          modal:
-            on: "hover" # ou "click"
-            title: "Exemples de Valeurs"
-            html_content: "Ancienne valeur : `APB2024-ADV-123456`<br/>Nouvelle valeur : `2025_123456`"
+        - label: "APB → Parcoursup"
+          subtitle: "<b>Détail:</b> APB2024-ADV-123 → 2025_123"
+          symbol: "edit"     # icône pour l’item
+          url: "https://exemple.com"  # clic = ouvre un onglet
+          modal:             # info contextuelle (hover/click)
+            on: "hover"      # "hover" ou "click"
+            title: "Exemples"
+            html_content: "Ancienne: <code>APB2024-ADV-123</code><br/>Nouvelle: <code>2025_123</code>"
+```
 
-B. html_content (Contenu HTML simple)
-Pour un contrôle total mais simple du contenu, vous pouvez directement injecter un bloc de HTML.
-
-Exemple avec html_content :
-
+### Contenu HTML simple (html_content)
+```yaml
 - id: contest_score
   type: default
   width: 250
   height: 50
   html_content: |
-    <div style="display: flex; align-items: center; justify-content: center; height: 100%;">
-      <h2 style="margin: 0; font-size: 16px; color: #c0392b;">ContestScore__c</h2>
+    <div style="display:flex;align-items:center;justify-content:center;height:100%;">
+      <h2 style="margin:0;font-size:16px;">ContestScore__c</h2>
     </div>
+```
 
-C. tableau (Nouveau type pour les données tabulaires)
-Un type spécial d'élément pour afficher des données sous forme de tableau.
-
-Exemple avec tableau :
-
+### Type spécial: tableau
+```yaml
 - id: ma_table
   type: tableau
   title: "Exemple de Tableau"
   width: 500
   height: 260
-  columns: ["ID Utilisateur", "Nom", "Date d'inscription"]
+  columns: ["ID", "Nom", "Date d'inscription"]
   rows:
     - ["usr_123", "Alice", "2023-01-15"]
     - ["usr_124", "Bob", "2023-02-20"]
-    # ... autres lignes
+```
 
-3. La section relations
-La section relations définit chaque flèche (arête) connectant deux éléments.
+---
 
-3.1. Attributs d'une relation
-Attribut
+## Relations (arêtes)
 
-Type
+### Attributs
+- from, to (string, requis): id des éléments
+- title, subtitle (string): titre/sous-titre dans la boîte de label
+- content_list (list): liste à puces dans la boîte de label
+- style (string): dashed | dotted
+- color (string): couleur hex (ex: "#2980b9")
+- width, height (number): requis si label en HTML/content_list
 
-Obligatoire
+### Exemples
+Relation texte simple:
+```yaml
+- from: A
+  to: B
+  title: "Master-Detail (1-n)"
+```
 
-Description
+Relation avec content_list (boîte HTML):
+```yaml
+- from: account
+  to: contest
+  width: 240
+  height: 120
+  title: "Relation Master-Detail"
+  content_list:
+    - label: "✓ Empêche les orphelins"
+    - label: "✓ Suppression en cascade"
+    - label: "✓ Rollup Summary Fields"
+```
 
-from
+---
 
-Chaîne
+## Icônes et tags
 
-Oui
+### Icône à gauche du titre
+- Déterminée par priorité: tags → type
+- Mapping par défaut:
+  - user: tags ["person","user","people"] ou type "person"
+  - database: tags ["database","db","data"] ou type "database"
+  - api: tags ["api","service"] ou type "api"
+  - warning: tags ["warning","alert","risk"]
+  - new/edit/delete: tags ["new","add"] | ["edit","update"] | ["delete","remove"]
 
-L'id de l'élément de départ.
+### Symboles utilisables dans content_list
+- new, edit, delete, check, module, info, link, user, database, api, warning
 
-to
+---
 
-Chaîne
+## Formes (shape)
 
-Oui
+Ajouter à un élément:
+```yaml
+shape:
+  type: diamond  # rect (défaut), rounded, diamond, hexagon, triangle,
+                 # parallelogram, arrow-right|left|up|down,
+                 # regular-polygon, custom-polygon
+  # options selon la forme:
+  radius: 10           # rounded
+  rotation: 30         # rotation en degrés (regular/custom polygon)
+  orientation: up      # triangle: up|down|left|right
+  skew: 0.2            # parallelogram (0..0.4 conseillé)
+  head: 0.35           # flèches: proportion de la tête (0.2..0.8)
+  sides: 6             # regular-polygon
+  points:              # custom-polygon (coordonnées normalisées 0..1)
+    - [0, 0]
+    - [1, 0]
+    - [0.8, 1]
+    - [0.2, 1]
+```
 
-L'id de l'élément d'arrivée.
+Exemples:
+```yaml
+- id: diamond_node
+  title: "Décision"
+  shape: { type: diamond }
 
-title
+- id: arrow_step
+  title: "Étape"
+  shape: { type: arrow-right, head: 0.4 }
 
-Chaîne
+- id: hex
+  title: "Hexagone"
+  shape: { type: regular-polygon, sides: 6, rotation: 15 }
+```
 
-Non
+---
 
-Titre affiché dans une boîte sur la relation.
+## Groupes (clusters)
+- Utiliser `group` sur les éléments pour les regrouper visuellement.
+- Éviter d’utiliser un `group` identique à un `id` d’élément (sinon cycle).
 
-subtitle
+```yaml
+- id: service_a
+  group: "GCP"
+- id: service_b
+  group: "GCP"
+```
 
-Chaîne
+---
 
-Non
+## Bonnes pratiques
+- Échapper les caractères XML dans titres/labels: `&` → `&amp;` (ex: "A & B").
+- Fournir `width`/`height` pour les labels HTML de relations.
+- Préférer `content_list` pour un rendu clair et interactif.
+- Utiliser `tags` pour influencer l’icône du titre.
 
-Sous-titre affiché dans la boîte de la relation.
+---
 
-content_list
+## Dépannage
+- Erreur XML type “xmlParseEntityRef”: remplacer `&` par `&amp;` dans les chaînes.
+- Erreur “create a cycle (cluster)”: ne pas mettre `group` égal à un `id` d’élément.
+- Le rechargement auto (SSE) ne marche pas: vérifier que la page est servie via `index.js` et que vous sauvegardez bien le YAML ouvert.
 
-Liste
+---
 
-Non
+## Exemple complet
+```yaml
+elements:
+  - id: A
+    title: "Service API"
+    type: api
+    tags: ["api"]
+    group: "Backend"
+    width: 360
+    height: 180
+    shape: { type: rounded, radius: 12 }
+    content_list:
+      - label: "Endpoints"
+        symbol: "module"
+        values:
+          - label: "GET /users"
+            symbol: "info"
+          - label: "POST /users"
+            symbol: "new"
+          - label: "DELETE /users/:id"
+            symbol: "delete"
 
-Similaire à celle des éléments, permet d'ajouter une liste à puces dans la boîte de la relation.
-
-style
-
-Chaîne
-
-Non
-
-Style du trait de la flèche. Valeurs : dashed (tirets), dotted (points).
-
-color
-
-Chaîne
-
-Non
-
-Couleur du trait au format hexadécimal (ex: #ff0000).
-
-width
-
-Nombre
-
-Non
-
-Largeur de la boîte de label.
-
-height
-
-Nombre
-
-Non
-
-Hauteur de la boîte de label.
-
-Exemple de relation avec contenu :
+  - id: B
+    title: "Base de données"
+    type: database
+    group: "Backend"
+    width: 320
+    height: 120
 
 relations:
-  - from: account
-    to: contest
-    width: 240
-    height: 120
-    title: "Relation Master-Detail"
-    content_list:
-      - label: "Empêche les orphelins"
-        symbol: "check"
-      - label: "Suppression en cascade"
-        symbol: "check"
+  - from: A
+    to: B
+    style: dotted
+    color: "#2980b9"
+    title: "Persistance"
+```
 
-4. Annexe
-4.1. Symboles disponibles
-Voici la liste des symbol que vous pouvez utiliser dans content_list :
+---
 
-new: ➕ Icône verte pour les ajouts.
+## CLI
+```bash
+node index.js fichier.yaml \
+  --theme light   # light | dark
+  --layout TB     # TB | BT | LR | RL
+  --port 3000
+```
 
-edit: ✏️ Icône orange pour les modifications.
-
-delete: 🗑️ Icône rouge pour les suppressions.
-
-check: ✔️ Icône verte pour les confirmations/validations.
-
-module: 📦 Icône générique pour un module.
-
-info: ℹ️ Icône bleue pour l'information.
-
-link: 🔗 Icône de lien externe.
-
-user: 👤 Icône d'utilisateur.
-
-database: 🗄️ Icône de base de données.
-
-api: ↔️ Icône d'API.
-
-warning: ⚠️ Icône d'avertissement.
-
-4.2. Formes (shape) disponibles
-Vous pouvez modifier la forme d'un élément avec l'attribut shape.
-
-elements:
-  - id: my_diamond
-    shape:
-      type: diamond # ou hexagon, triangle, parallelogram, etc.
-    # ...
-
-Types de base : rect, rounded (par défaut), diamond, hexagon, triangle.
-
-Flèches : arrow-right, arrow-left, arrow-up, arrow-down.
-
-Polygones :
-
-regular-polygon avec sides: <nombre>.
-
-custom-polygon avec une liste de points normalisés [[x,y], ...].
-
-Options :
-
-rotation: <degrés> pour faire pivoter la forme.
-
-orientation: 'up' | 'down' | 'left' | 'right' pour les triangles.
+Le serveur regénère le SVG et notifie la page de se recharger automatiquement à chaque sauvegarde du YAML.
