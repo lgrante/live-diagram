@@ -25,11 +25,14 @@
 
 const fs = require('fs');
 const http = require('http');
+const express = require('express');
+const cors = require('cors');
 const path = require('path');
 const yaml = require('js-yaml');
 const dagre = require('dagre');
 const yargs = require('yargs/yargs');
 const { hideBin } = require('yargs/helpers');
+const { spawn } = require('child_process');
 
 // =============================================================================
 // CONFIGURATION GLOBALE
@@ -40,15 +43,41 @@ const { hideBin } = require('yargs/helpers');
  * complète pour tous les éléments du diagramme.
  */
 const THEMES = {
+    // Aligné sur les tokens documentés
     light: {
-        background: '#FFFFFF', text: '#2d3748', textFaded: '#a0aec0', border: '#e2e8f0', arrow: '#a0aec0',
-        default: '#f7fafc', person: '#ebf8ff', system: '#f0fff4', database: '#fffaf0', api: '#faf5ff', tableau: '#f1f5f9',
-        hover: '#edf2f7', clusterBg: '#f7fafc', modalBg: '#ffffff', modalShadow: 'rgba(0,0,0,0.1)'
+        background: '#ffffff',
+        text: '#111827',          // gray-900
+        textFaded: '#6b7280',      // gray-500
+        border: '#e5e7eb',         // gray-200
+        arrow: '#6b7280',          // neutre
+        default: '#ffffff',
+        person: '#e0f2fe',     // sky-100
+        system: '#dcfce7',     // green-100
+        database: '#fef9c3',   // yellow-100
+        api: '#fae8ff',        // purple-100
+        tableau: '#f3f4f6',    // gray-100
+        hover: '#eef2f7',
+        clusterBg: '#f9fafb',  // gray-50
+        modalBg: '#ffffff',
+        modalShadow: 'rgba(0,0,0,0.10)'
     },
+    // Palette sombre inspirée de GitHub Dark
     dark: {
-        background: '#1a202c', text: '#e2e8f0', textFaded: '#a0aec0', border: '#4a5568', arrow: '#a0aec0',
-        default: '#2d3748', person: '#2c5282', system: '#2f855a', database: '#975a16', api: '#44337a', tableau: '#2b3442',
-        hover: '#4a5568', clusterBg: '#2d3748', modalBg: '#2d3748', modalShadow: 'rgba(0,0,0,0.4)'
+        background: '#0d1117',
+        text: '#e5e7eb',           // near gray-50
+        textFaded: '#9ca3af',      // gray-400
+        border: '#30363d',
+        arrow: '#8b949e',
+        default: '#161b22',
+        person: '#0b2f53',
+        system: '#113227',
+        database: '#3b2f0b',
+        api: '#2b213a',
+        tableau: '#1f242d',
+        hover: '#21262d',
+        clusterBg: '#161b22',
+        modalBg: '#161b22',
+        modalShadow: 'rgba(0,0,0,0.45)'
     }
 };
 
@@ -65,17 +94,17 @@ const CONFIG = {
  * Bibliothèque d'icônes SVG. Facilement extensible.
  */
 const ICONS = {
-    new: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#27ae60" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="M12 8v8"></path><path d="M8 12h8"></path></svg>`,
-    edit: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d35400" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>`,
-    delete: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#c0392b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`,
-    check: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#27ae60" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`,
+    new: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"></path><path d="M12 8v8"></path><path d="M8 12h8"></path></svg>`,
+    edit: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"></path></svg>`,
+    delete: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>`,
+    check: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`,
     module: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>`,
-    info: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2980b9" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`,
+    info: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`,
     link: `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.72"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.72"></path></svg>`,
     user: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>`,
     database: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path></svg>`,
     api: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h-1a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h1"></path><path d="M2 8h1a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H2"></path><path d="M12 2v20"></path></svg>`,
-    warning: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f39c12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`
+    warning: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`
 };
 
 // =============================================================================
@@ -451,6 +480,37 @@ class DiagramGenerator {
         this.labelGenerator = new RelationLabelGenerator(this.themeColors);
     }
 
+    /** Redimensionne un SVG d'icône (width/height) à la taille demandée. */
+    sizeIconSvg(svg, size = 20) {
+        if (!svg) return '';
+        return String(svg)
+            .replace(/width="\d+"/i, `width="${size}"`)
+            .replace(/height="\d+"/i, `height="${size}"`);
+    }
+
+    /**
+     * Retourne une icône pertinente pour un groupe selon son libellé.
+     * On utilise les mêmes mots-clés que pour les éléments (tags/type-like).
+     * @param {string} groupLabel
+     * @returns {string} SVG string or empty string
+     */
+    getGroupIconSvg(groupLabel) {
+        if (!groupLabel) return '';
+        const label = String(groupLabel).toLowerCase();
+        const mapping = [
+            { keys: ['person', 'user', 'people', 'humain', 'utilisateur'], icon: 'user' },
+            { keys: ['database', 'db', 'donnée', 'data'], icon: 'database' },
+            { keys: ['api', 'service'], icon: 'api' },
+            { keys: ['warning', 'alert', 'risque', 'risk'], icon: 'warning' },
+            { keys: ['module', 'package'], icon: 'module' },
+            { keys: ['info', 'information'], icon: 'info' }
+        ];
+        for (const m of mapping) {
+            if (m.keys.some(k => label.includes(k))) return ICONS[m.icon] || '';
+        }
+        return '';
+    }
+
     /**
      * Génère le diagramme SVG complet à partir des données.
      * @param {object} diagramData - Les données parsées du fichier YAML.
@@ -530,9 +590,12 @@ class DiagramGenerator {
         let svg = this.generateSVGHeader(graphWidth, graphHeight);
         svg += this.generateStylesAndScripts();
         svg += '<g transform="translate(25, 25)">';
-        svg += this.renderClusters(graph);
+        // Fond des clusters (rectangles)
+        svg += this.renderClusterBackgroundsSimple(graph);
         svg += this.renderEdges(graph);
         svg += this.renderNodes(graph);
+        // En-têtes (icône + titre) rendus par-dessus, à l'intérieur du cluster
+        svg += this.renderClusterHeadersInside(graph);
         svg += '</g>';
         svg += `<foreignObject x="0" y="0" width="100%" height="100%" style="pointer-events:none;">${this.modalManager.generateModalsHTML(this.themeColors)}</foreignObject>`;
         svg += '</svg>';
@@ -556,7 +619,7 @@ class DiagramGenerator {
     generateStylesAndScripts() {
         // Injecte aussi un client SSE minimal qui recharge la page quand /events pousse "reload"
         const sseClient = `(()=>{try{const es=new EventSource('/events');es.onmessage=(e)=>{if(e&&e.data==='reload'){location.reload();}};}catch(e){console.warn('SSE indisponible',e);}})();`;
-        return `<defs><style type="text/css"><![CDATA[.edge-label{font-size:11px;fill:${this.themeColors.textFaded};text-anchor:middle;dominant-baseline:middle}.cluster-label{fill:${this.themeColors.text};font-weight:700}${this.modalManager.generateModalCSS(this.themeColors)}]]></style><script type="application/javascript"><![CDATA[${this.modalManager.generateModalJS()}${sseClient}]]></script><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="${this.themeColors.arrow}"/></marker></defs>`;
+        return `<defs><style type="text/css"><![CDATA[.edge-label{font-size:11px;fill:${this.themeColors.textFaded};text-anchor:middle;dominant-baseline:middle}.cluster-label{fill:${this.themeColors.text};font-weight:700;font-size:20px;text-anchor:middle}${this.modalManager.generateModalCSS(this.themeColors)}]]></style><script type="application/javascript"><![CDATA[${this.modalManager.generateModalJS()}${sseClient}]]></script><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="${this.themeColors.arrow}"/></marker></defs>`;
     }
 
     /**
@@ -564,14 +627,46 @@ class DiagramGenerator {
      * @param {object} graph - Le graphe positionné.
      * @returns {string} Le code SVG des clusters.
      */
-    renderClusters(graph) {
+    // Fond simple des clusters (rectangles seulement)
+    renderClusterBackgroundsSimple(graph) {
         let svg = '';
         graph.nodes().forEach(nodeId => {
             const node = graph.node(nodeId);
             if (node.clusterLabelPos) {
                 const x = node.x - node.width / 2;
                 const y = node.y - node.height / 2;
-                svg += `<g transform="translate(${x},${y})"><rect width="${node.width}" height="${node.height}" rx="${CONFIG.borderRadius}" ry="${CONFIG.borderRadius}" fill="${this.themeColors.clusterBg}" stroke="${this.themeColors.border}" stroke-width="1.5"/><text x="15" y="25" class="cluster-label">${node.label}</text></g>`;
+                svg += `<g transform="translate(${x},${y})"><rect width="${node.width}" height="${node.height}" rx="${CONFIG.borderRadius}" ry="${CONFIG.borderRadius}" fill="${this.themeColors.clusterBg}" stroke="${this.themeColors.border}" stroke-width="1.5"/></g>`;
+            }
+        });
+        return svg;
+    }
+
+    // Titre + icône à l'intérieur du cluster, en surimpression (ne change pas le layout)
+    renderClusterHeadersInside(graph) {
+        let svg = '';
+        const headerHeight = 56; // zone visuelle pour le titre
+        const gapTop = 0;        // pas de masque sous le titre pour ne pas cacher le 1er élément
+        const gapBottom = 14;    // espace visuel au bas du cluster
+        graph.nodes().forEach(nodeId => {
+            const node = graph.node(nodeId);
+            if (node.clusterLabelPos) {
+                const x = node.x - node.width / 2;
+                const y = node.y - node.height / 2;
+                const icon = this.sizeIconSvg(this.getGroupIconSvg(node.label), 18);
+                const headerHtml = `
+                    <div xmlns="http://www.w3.org/1999/xhtml" style="height:${headerHeight}px;display:flex;align-items:center;justify-content:center;padding:10px 0;">
+                        <div style="display:flex;align-items:center;gap:8px;color:${this.themeColors.text};font-family:${CONFIG.fontFamily};font-weight:700;font-size:20px;">
+                            ${icon ? `<span style=\"display:inline-flex;align-items:center;\">${icon}</span>` : ''}
+                            <span>${node.label}</span>
+                        </div>
+                    </div>`;
+                const topMaskH = headerHeight + gapTop; // = headerHeight
+                const bottomMaskY = Math.max(0, node.height - gapBottom);
+                svg += `<g transform="translate(${x},${y})">
+                            <rect x="0" y="0" width="${node.width}" height="${topMaskH}" fill="${this.themeColors.clusterBg}" style="pointer-events:none"/>
+                            <rect x="0" y="${bottomMaskY}" width="${node.width}" height="${gapBottom}" fill="${this.themeColors.clusterBg}" style="pointer-events:none"/>
+                            <foreignObject x="0" y="0" width="${node.width}" height="${headerHeight}">${headerHtml}</foreignObject>
+                        </g>`;
             }
         });
         return svg;
@@ -634,14 +729,14 @@ class DiagramGenerator {
                 const borderColor = this.themeColors.border;
                 const shapeSpec = node.shape || { type: 'rect' };
                 const shapeSvg = ShapeBuilder.buildShapeSvg(shapeSpec, node.width, node.height, fillColor, borderColor, CONFIG.borderRadius);
-                svg += `
+        svg += `
                     <g transform="translate(${x},${y})">
                         ${shapeSvg}
-                        ${node.generatedSvg}
-                    </g>
-                `;
+                ${node.generatedSvg}
+            </g>
+        `;
             }
-        });
+    });
     return svg;
 }
 }
@@ -659,7 +754,7 @@ class ShapeBuilder {
             case 'rounded-rect':
                 return `<rect width="${width}" height="${height}" rx="${shape.radius ?? defaultRadius}" ry="${shape.radius ?? defaultRadius}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`;
             case 'rect':
-                return `<rect width="${width}" height="${height}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`;
+                return `<rect width="${width}" height="${height}" rx="${shape.radius ?? defaultRadius}" ry="${shape.radius ?? defaultRadius}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`;
             case 'diamond': {
                 const pts = this.pointsDiamond(width, height);
                 return `<polygon points="${this.pointsToString(pts)}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`;
@@ -795,6 +890,7 @@ function main() {
         .option('port', { alias: 'p', type: 'number', description: 'Port pour le serveur web', default: 3000 })
         .option('theme', { alias: 't', type: 'string', description: 'Thème visuel (light ou dark)', default: 'light', choices: ['light', 'dark'] })
         .option('layout', { alias: 'l', type: 'string', description: 'Direction du layout (TB, BT, LR, RL)', default: 'TB', choices: ['TB', 'BT', 'LR', 'RL'] })
+        .option('start-client', { alias: 'c', type: 'boolean', description: 'Démarrer aussi le client React', default: false })
         .demandCommand(1, 'Vous devez spécifier un fichier.')
         .help().alias('h', 'help').argv;
 
@@ -802,6 +898,7 @@ function main() {
     const port = argv.port;
     const theme = argv.theme;
     const layout = argv.layout;
+    const shouldStartClient = argv['start-client'];
 
     if (!fs.existsSync(filePath)) {
         console.error(`❌ Erreur: Le fichier '${filePath}' n'a pas été trouvé.`);
@@ -848,28 +945,69 @@ function main() {
             }, 100);
         });
 
-        const server = http.createServer((req, res) => {
-            const url = req.url || '/';
-            if (url === '/events') {
-                // Endpoint SSE pour signaux de rafraîchissement
-                res.writeHead(200, {
-                    'Content-Type': 'text/event-stream',
-                    'Cache-Control': 'no-cache',
-                    'Connection': 'keep-alive',
-                    'Access-Control-Allow-Origin': '*'
-                });
-                res.write('retry: 1000\n\n');
-                sseClients.add(res);
-                req.on('close', () => { sseClients.delete(res); });
-                return;
-            }
+        // --- Serveur Express ---
+        const app = express();
+        app.use(cors());
+        app.use(express.json({ limit: '2mb' }));
 
-            console.log(`[${new Date().toISOString()}] 📊 Requête reçue pour le diagramme`);
-            res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
-            res.end(svgOutput);
+        // SSE pour reload auto de la page simple (ancienne page)
+        app.get('/events', (req, res) => {
+            res.writeHead(200, {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'Access-Control-Allow-Origin': '*'
+            });
+            res.write('retry: 1000\n\n');
+            sseClients.add(res);
+            req.on('close', () => { sseClients.delete(res); });
         });
 
-        server.listen(port, () => {
+        // Route legacy: renvoie le SVG courant (pour compat direct)
+        app.get('/', (req, res) => {
+            console.log(`[${new Date().toISOString()}] 📊 GET / → SVG`);
+            res.type('image/svg+xml').send(svgOutput);
+        });
+
+        // API React: génère un SVG à partir d’un JSON YAML-like envoyé par l’app
+        app.post('/api/generate-diagram', (req, res) => {
+            try {
+                const payload = req.body;
+                if (!payload || !payload.elements || !payload.relations) {
+                    return res.status(400).json({ error: 'Payload invalide: elements et relations requis' });
+                }
+                const requestedTheme = typeof payload.theme === 'string' ? String(payload.theme).toLowerCase() : null;
+                const safeTheme = requestedTheme && (requestedTheme === 'dark' || requestedTheme === 'light') ? requestedTheme : theme;
+                const svg = new DiagramGenerator(safeTheme, layout).generateSVG(payload);
+                res.type('image/svg+xml').send(svg);
+            } catch (e) {
+                console.error('Erreur /api/generate-diagram:', e);
+                res.status(500).json({ error: 'Erreur génération', message: e.message });
+            }
+        });
+
+        // Serveur HTTP
+        const server = http.createServer(app);
+
+        // Routes supplémentaires pour l'app React
+        app.get('/api/current-diagram', (req, res) => {
+            try {
+                const requestedTheme = typeof req.query.theme === 'string' ? String(req.query.theme).toLowerCase() : null;
+                if (requestedTheme && (requestedTheme === 'dark' || requestedTheme === 'light')) {
+                    const svg = new DiagramGenerator(requestedTheme, layout).generateSVG(diagramData);
+                    return res.type('image/svg+xml').send(svg);
+                }
+                return res.type('image/svg+xml').send(svgOutput);
+            } catch (e) {
+                console.error('Erreur /api/current-diagram:', e);
+                res.status(500).type('text/plain').send('Erreur');
+            }
+        });
+        app.get('/api/current-data', (req, res) => {
+            res.json(diagramData || { elements: [], relations: [] });
+        });
+
+        server.listen(port, async () => {
             console.log(`\n🎉 Diagramme généré avec succès !`);
             console.log(`   📊 Éléments: ${diagramData.elements.length}`);
             console.log(`   🔗 Relations: ${diagramData.relations.length}`);
@@ -880,6 +1018,19 @@ function main() {
             console.log(`   Ouvrez votre navigateur à l'adresse suivante :`);
             console.log(`   \x1b[32m\x1b[1mhttp://localhost:${port}\x1b[0m`);
             console.log(`\n(Appuyez sur Ctrl+C pour arrêter le serveur)`);
+
+            if (shouldStartClient) {
+                // Lance le client React (port par défaut 5173 ou 3001 selon config)
+                // On laisse l’app client utiliser window.location.origin → configurer un proxy/devServer si nécessaire.
+                const child = spawn('npm', ['start'], {
+                    cwd: path.join(process.cwd(), 'diagram-client'),
+                    stdio: 'inherit',
+                    env: { ...process.env }
+                });
+                child.on('close', (code) => {
+                    console.log(`Client React arrêté (code ${code}).`);
+                });
+            }
         });
 
     } catch (error) {
